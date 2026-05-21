@@ -1,0 +1,27 @@
+{
+  "name": "agy_status_line_plugin",
+  "version": "0.1.0",
+  "description": "A rich 3-line terminal status bar plugin for Antigravity CLI — showing model info, billing plan, real-time token usage, 5-hour cumulative cost tracking, active subagents, task progress, and context utilization.",
+  "author": {
+    "name": "Tiny"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tiny/agy_status_line_plugin"
+  },
+  "keywords": [
+    "antigravity",
+    "antigravity-cli",
+    "status-line",
+    "status-bar",
+    "gemini",
+    "terminal",
+    "plugin",
+    "token-usage",
+    "cost-tracking"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

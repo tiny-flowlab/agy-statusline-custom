@@ -1,0 +1,26 @@
+# ── Runtime State ─────────────────────────────────────────────────────────
+# Contains personal usage data (token counts, timestamps).
+# Auto-created on first run from session_state.example.json structure.
+session_state.json
+
+# ── Local Cache & Session Files ────────────────────────────────────────────
+.antigravitycli/
+
+# ── Debug & Log Files ──────────────────────────────────────────────────────
+*.log
+stdin.log
+env.log
+usage_output.log
+
+# ── Backup Files ───────────────────────────────────────────────────────────
+*.bak
+
+# ── Node.js ────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── OS Files ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

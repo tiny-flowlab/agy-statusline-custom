@@ -1,0 +1,18 @@
+{
+  "_comment": "This is an example structure for session_state.json. The actual file is auto-generated at runtime and is excluded from git via .gitignore.",
+  "sessions": {
+    "<session-uuid-here>": {
+      "accumulated_cache_read_tokens": 0,
+      "last_total_input": 0,
+      "last_total_output": 0,
+      "last_current_input": -1,
+      "last_current_output": -1
+    }
+  },
+  "global_cumulative": {
+    "window_start_time": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_tokens": 0
+  }
+}
