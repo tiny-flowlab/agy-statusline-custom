@@ -316,30 +316,40 @@ process.stdin.on('end', () => {
         last_total_input: 0,
         last_total_output: 0,
         last_current_input: -1,
-        last_current_output: -1
+        last_current_output: -1,
+        // Monotonically-increasing display counters — immune to context compaction dips
+        display_input: 0,
+        display_output: 0
       };
     }
 
     const sessionState = state.sessions[sessionId];
 
-    // Calculate deltas
+    // Ensure display counters exist for migrated sessions
+    if (sessionState.display_input === undefined) sessionState.display_input = sessionState.last_total_input || 0;
+    if (sessionState.display_output === undefined) sessionState.display_output = sessionState.last_total_output || 0;
+
+    // Calculate deltas — only positive deltas are recorded
+    // total_input_tokens can DROP during context compaction; we track last seen and
+    // only add the positive diff to our monotonic display counter.
     let deltaInput = 0;
     let deltaOutput = 0;
     let deltaCache = 0;
 
     if (totalInput >= sessionState.last_total_input) {
       deltaInput = totalInput - sessionState.last_total_input;
-      sessionState.last_total_input = totalInput;
-    } else {
-      sessionState.last_total_input = totalInput;
     }
+    // Always update last_total_input (even on drops) so next positive delta is relative
+    sessionState.last_total_input = totalInput;
 
     if (totalOutput >= sessionState.last_total_output) {
       deltaOutput = totalOutput - sessionState.last_total_output;
-      sessionState.last_total_output = totalOutput;
-    } else {
-      sessionState.last_total_output = totalOutput;
     }
+    sessionState.last_total_output = totalOutput;
+
+    // Accumulate into monotonic display counters
+    sessionState.display_input += deltaInput;
+    sessionState.display_output += deltaOutput;
 
     if (sessionState.last_current_input !== currentInput || sessionState.last_current_output !== currentOutput) {
       deltaCache = cacheHit;
@@ -360,6 +370,10 @@ process.stdin.on('end', () => {
       if (process.env.DEBUG) process.stderr.write(`[status_line] Failed to write session state: ${err.message}\n`);
     }
 
+    // Use monotonic display values for rendering (stable, never decreases)
+    totalInput = sessionState.display_input;
+    totalOutput = sessionState.display_output;
+
     accumulatedCache = sessionState.accumulated_cache_read_tokens;
     globalCumInput = state.global_cumulative.input_tokens;
     globalCumOutput = state.global_cumulative.output_tokens;
@@ -371,19 +385,52 @@ process.stdin.on('end', () => {
     globalCumCache = cacheHit;
   }
 
-  // Calculate cost using the formula:
-  // Input: $1.5/M tokens ($0.0000015 / token)
-  // Output: $9.0/M tokens ($0.000009 / token)
-  // Cache Hit: $0.15/M tokens ($0.00000015 / token)
-  const inputCost = totalInput * 0.0000015;
-  const outputCost = totalOutput * 0.000009;
-  const cacheCost = accumulatedCache * 0.00000015;
+  // ── Model-Aware Pricing ──────────────────────────────────────────────────
+  // Rates per token (USD). Source: Google AI pricing (May 2025).
+  // Tiered pricing (e.g. >200k context surcharges) is simplified to base tier.
+  function getPricing(modelId, displayName) {
+    const id = (modelId || displayName || '').toLowerCase();
+    // Gemini 2.5 Pro
+    if (id.includes('2.5') && id.includes('pro')) {
+      return { input: 1.25 / 1e6, output: 10.00 / 1e6, cache: 0.315 / 1e6 };
+    }
+    // Gemini 2.5 Flash (includes thinking variants)
+    if (id.includes('2.5') && id.includes('flash')) {
+      return { input: 0.30 / 1e6, output: 3.50 / 1e6, cache: 0.075 / 1e6 };
+    }
+    // Gemini 2.0 Flash / Flash-Lite / Flash-Exp
+    if (id.includes('2.0') && id.includes('flash')) {
+      return { input: 0.10 / 1e6, output: 0.40 / 1e6, cache: 0.025 / 1e6 };
+    }
+    // Gemini 1.5 Pro
+    if (id.includes('1.5') && id.includes('pro')) {
+      return { input: 1.25 / 1e6, output: 5.00 / 1e6, cache: 0.3125 / 1e6 };
+    }
+    // Gemini 1.5 Flash
+    if (id.includes('1.5') && id.includes('flash')) {
+      return { input: 0.075 / 1e6, output: 0.30 / 1e6, cache: 0.01875 / 1e6 };
+    }
+    // Gemini 1.0 Pro / Gemini Pro
+    if ((id.includes('1.0') || !id.includes('.')) && id.includes('pro')) {
+      return { input: 0.50 / 1e6, output: 1.50 / 1e6, cache: 0.00 / 1e6 };
+    }
+    // Default fallback: Gemini 2.5 Flash rates
+    return { input: 0.30 / 1e6, output: 3.50 / 1e6, cache: 0.075 / 1e6 };
+  }
+
+  const modelId = (data.model && data.model.id) || '';
+  const pricing = getPricing(modelId, modelName);
+
+  // Session cost (using monotonic display totals)
+  const inputCost = totalInput * pricing.input;
+  const outputCost = totalOutput * pricing.output;
+  const cacheCost = accumulatedCache * pricing.cache;
   const totalCost = inputCost + outputCost + cacheCost;
 
-  // Calculate cumulative cost:
-  const cumInputCost = globalCumInput * 0.0000015;
-  const cumOutputCost = globalCumOutput * 0.000009;
-  const cumCacheCost = globalCumCache * 0.00000015;
+  // 5-hour cumulative cost
+  const cumInputCost = globalCumInput * pricing.input;
+  const cumOutputCost = globalCumOutput * pricing.output;
+  const cumCacheCost = globalCumCache * pricing.cache;
   const cumulativeCost = cumInputCost + cumOutputCost + cumCacheCost;
 
   const formattedCostWide = `${t.value}$${totalCost.toFixed(2)}${reset} ${t.divider}(5h:${reset} ${t.gold}$${cumulativeCost.toFixed(2)}${reset} ${t.divider}[${timeRemainingStr} left])${reset}`;
