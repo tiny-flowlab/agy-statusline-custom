@@ -86,7 +86,7 @@ DEBUG=1 node status_line.js           # Print parse errors to stderr
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/tiny/agy-status-line.git
+git clone https://github.com/tiny-flowlab/agy-statusline-custom.git
 cd agy-status-line
 
 # 2. Run installer

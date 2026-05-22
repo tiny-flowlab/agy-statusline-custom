@@ -7,7 +7,7 @@
 [![Author: Tiny](https://img.shields.io/badge/Author-Tiny-00f0ff?style=for-the-badge&logo=visual-studio-code)](https://tiny-flowlab.com)
 [![Website: tiny-flowlab.com](https://img.shields.io/badge/Website-tiny--flowlab.com-10b981?style=for-the-badge&logo=google-chrome)](https://tiny-flowlab.com)
 [![Antigravity: Plugin](https://img.shields.io/badge/Antigravity-Plugin-8b5cf6?style=for-the-badge&logo=terminal)](https://github.com/antigravity)
-[![Version](https://img.shields.io/badge/Version-0.3.0-3b82f6?style=for-the-badge)](https://github.com/tiny/agy_status_line_plugin)
+[![Version](https://img.shields.io/badge/Version-0.3.0-3b82f6?style=for-the-badge)](https://github.com/tiny-flowlab/agy-statusline-custom)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 </div>
@@ -77,7 +77,7 @@ npm install -g .
 
 ### 1. Clone this Plugin Repository
 ```bash
-git clone https://github.com/tiny/agy-status-line.git
+git clone https://github.com/tiny-flowlab/agy-statusline-custom.git
 cd agy-status-line
 ```
 
@@ -245,7 +245,7 @@ npm install -g .
 
 ### 1. 플러그인 저장소 복제
 ```bash
-git clone https://github.com/tiny/agy-status-line.git
+git clone https://github.com/tiny-flowlab/agy-statusline-custom.git
 cd agy-status-line
 ```
 

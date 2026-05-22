@@ -10,7 +10,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tiny/agy_status_line_plugin"
+    "url": "https://github.com/tiny-flowlab/agy-statusline-custom"
   },
   "keywords": [
     "antigravity",
