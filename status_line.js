@@ -275,111 +275,44 @@ process.stdin.on('end', () => {
 
     const currentTime = Date.now();
 
-    // ── Fixed Hourly Anchor System ──────────────────────────────────────────
-    // Anchors daily reset blocks to exact user-expected hours.
-    // 00:00 - 04:00 (4h) | 04:00 - 09:00 (5h) | 09:00 - 14:00 (5h) | 14:00 - 19:00 (5h) | 19:00 - 00:00 (5h)
-    function getAnchorStartTime(ms) {
-      const d = new Date(ms);
-      const hours = d.getHours();
-      const anchors = [0, 4, 9, 14, 19];
-      let matchedHour = 0;
-      for (let i = anchors.length - 1; i >= 0; i--) {
-        if (hours >= anchors[i]) {
-          matchedHour = anchors[i];
-          break;
-        }
-      }
-      const anchorDate = new Date(ms);
-      anchorDate.setHours(matchedHour, 0, 0, 0);
-      return anchorDate.getTime();
-    }
-
-    function getNextAnchorTime(currentAnchorMs) {
-      const d = new Date(currentAnchorMs);
-      const hour = d.getHours();
-      const nextMap = { 0: 4, 4: 9, 9: 14, 14: 19, 19: 24 };
-      const nextHour = nextMap[hour] !== undefined ? nextMap[hour] : (hour + 5);
-      
-      const nextDate = new Date(currentAnchorMs);
-      if (nextHour === 24) {
-        nextDate.setDate(nextDate.getDate() + 1);
-        nextDate.setHours(0, 0, 0, 0);
-      } else {
-        nextDate.setHours(nextHour, 0, 0, 0);
-      }
-      return nextDate.getTime();
-    }
-
-    const currentAnchorStart = getAnchorStartTime(currentTime);
-    const nextAnchorStart = getNextAnchorTime(currentAnchorStart);
-
-    if (!state.global_cumulative) {
-      state.global_cumulative = {
-        window_start_time: currentAnchorStart,
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_tokens: 0
-      };
-    }
-
-    // Reset window if stored start time does not match current anchor block start
-    if (state.global_cumulative.window_start_time !== currentAnchorStart) {
-      state.global_cumulative.window_start_time = currentAnchorStart;
-      state.global_cumulative.input_tokens = 0;
-      state.global_cumulative.output_tokens = 0;
-      state.global_cumulative.cache_tokens = 0;
-    }
-
-    const timeRemainingMs = Math.max(0, nextAnchorStart - currentTime);
-    const remHours = Math.floor(timeRemainingMs / (60 * 60 * 1000));
-    const remMinutes = Math.floor((timeRemainingMs % (60 * 60 * 1000)) / (60 * 1000));
-    timeRemainingStr = `${remHours}h ${remMinutes}m`;
+    // ── 5-Hour Sliding Window & New Session Reset ───────────────────────────
+    const fiveHoursAgo = currentTime - (5 * 60 * 60 * 1000); // 5 hours in milliseconds
 
     if (!state.sessions) {
       state.sessions = {};
     }
 
-    // Migrate from single session format if exists
-    if (state.session_id && !state.sessions[state.session_id]) {
-      state.sessions[state.session_id] = {
-        accumulated_cache_read_tokens: state.accumulated_cache_read_tokens || 0,
-        last_total_input: state.last_total_input || 0,
-        last_total_output: state.last_total_output || 0,
-        last_current_input: state.last_current_input || -1,
-        last_current_output: state.last_current_output || -1
-      };
-      delete state.session_id;
-      delete state.accumulated_cache_read_tokens;
-      delete state.last_total_input;
-      delete state.last_total_output;
-      delete state.last_current_input;
-      delete state.last_current_output;
-    }
-
+    // 1. If this is a brand new session, perform a hard reset for both history and global metrics
     if (!state.sessions[sessionId]) {
+      if (process.env.DEBUG) {
+        process.stderr.write(`[status_line] New session detected: ${sessionId}. Resetting global history & cumulative metrics.\n`);
+      }
+      state.global_history = [];
+      state.global_cumulative = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_tokens: 0
+      };
       state.sessions[sessionId] = {
         accumulated_cache_read_tokens: 0,
-        last_step_timestamp: 0
+        last_step_timestamp: 0,
+        cumulative_input: 0,
+        cumulative_output: 0,
+        cumulative_cache: 0,
+        display_input: 0,
+        display_output: 0,
+        last_step_signature: ''
       };
     }
 
     const sessionState = state.sessions[sessionId];
 
     // Ensure session-level cumulative tracking fields are initialized to 0
-    // To maintain mathematical integrity (In + Cache >= Out), we perform pure self-aggregation starting from 0.
-    if (sessionState.cumulative_input === undefined) {
-      sessionState.cumulative_input = 0;
-    }
-    if (sessionState.cumulative_output === undefined) {
-      sessionState.cumulative_output = 0;
-    }
-    if (sessionState.cumulative_cache === undefined) {
-      sessionState.cumulative_cache = 0;
-    }
+    if (sessionState.cumulative_input === undefined) sessionState.cumulative_input = 0;
+    if (sessionState.cumulative_output === undefined) sessionState.cumulative_output = 0;
+    if (sessionState.cumulative_cache === undefined) sessionState.cumulative_cache = 0;
 
     // ── Self-Healing / Realignment of legacy corrupted state ─────────────────
-    // If the saved session cumulative output mathematically exceeds the combined input and cache,
-    // or has legacy corrupted metrics, we force-align the session back to dynamic self-aggregation starting fresh.
     const combinedInputAndCache = (sessionState.cumulative_input || 0) + (sessionState.cumulative_cache || 0);
     if ((sessionState.cumulative_output || 0) > combinedInputAndCache || 
         (sessionState.cumulative_output > 10000 && sessionState.cumulative_input === 0)) {
@@ -395,15 +328,20 @@ process.stdin.on('end', () => {
     }
 
     // To prevent duplicate additions from the exact same step (idempotency),
-    // we track the step's unique context footprint or a timestamp signature.
-    // Antigravity CLI invokes the status line once per step.
+    // we track the step's unique context footprint.
     const stepSignature = `${currentInput}-${currentOutput}-${cacheHit}-${totalInput}-${totalOutput}`;
     if (sessionState.last_step_signature !== stepSignature) {
-      // 1. Accumulate step-level raw deltas directly to global 5h metrics
-      // This is 100% mathematically correct and immune to context window dips or compacting!
-      state.global_cumulative.input_tokens += currentInput;
-      state.global_cumulative.output_tokens += currentOutput;
-      state.global_cumulative.cache_tokens += cacheHit;
+      if (!state.global_history) {
+        state.global_history = [];
+      }
+
+      // 1. Record step-level raw deltas directly to global history array
+      state.global_history.push({
+        timestamp: currentTime,
+        input: currentInput,
+        output: currentOutput,
+        cache: cacheHit
+      });
 
       // 2. Pure session-level self-aggregation based on raw deltas
       sessionState.cumulative_input = (sessionState.cumulative_input || 0) + currentInput;
@@ -414,7 +352,6 @@ process.stdin.on('end', () => {
       sessionState.accumulated_cache_read_tokens = sessionState.cumulative_cache;
       sessionState.display_input = sessionState.cumulative_input;
       sessionState.display_output = sessionState.cumulative_output;
-
       sessionState.last_step_signature = stepSignature;
 
       // Save back to file
@@ -425,12 +362,49 @@ process.stdin.on('end', () => {
       }
     }
 
-    accumulatedCache = sessionState.accumulated_cache_read_tokens;
-    globalCumInput = state.global_cumulative.input_tokens;
-    globalCumOutput = state.global_cumulative.output_tokens;
-    globalCumCache = state.global_cumulative.cache_tokens;
+    // 3. Filter history to keep only records within the 5-hour rolling window
+    if (!state.global_history) {
+      state.global_history = [];
+    }
+    state.global_history = state.global_history.filter(log => log.timestamp >= fiveHoursAgo);
 
-    // Use stored session cumulative values
+    // 4. Dynamically compute global sums based on the active 5-hour window
+    globalCumInput = 0;
+    globalCumOutput = 0;
+    globalCumCache = 0;
+
+    for (const log of state.global_history) {
+      globalCumInput += log.input;
+      globalCumOutput += log.output;
+      globalCumCache += log.cache;
+    }
+
+    // Update global_cumulative object for structure integrity
+    state.global_cumulative = {
+      input_tokens: globalCumInput,
+      output_tokens: globalCumOutput,
+      cache_tokens: globalCumCache
+    };
+
+    // Save state again after history filter
+    try {
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+    } catch (err) {
+      // Ignored
+    }
+
+    // 5. Calculate precise remaining time until oldest item ages out
+    if (state.global_history.length > 0) {
+      const oldestLogTime = state.global_history[0].timestamp;
+      const timeRemainingMs = Math.max(0, (oldestLogTime + (5 * 60 * 60 * 1000)) - currentTime);
+      const remHours = Math.floor(timeRemainingMs / (60 * 60 * 1000));
+      const remMinutes = Math.floor((timeRemainingMs % (60 * 60 * 1000)) / (60 * 1000));
+      timeRemainingStr = `${remHours}h ${remMinutes}m`;
+    } else {
+      timeRemainingStr = '5h 00m';
+    }
+
+    accumulatedCache = sessionState.accumulated_cache_read_tokens;
     sessionCumInput = sessionState.cumulative_input;
     sessionCumOutput = sessionState.cumulative_output;
     sessionCumCache = sessionState.cumulative_cache;
