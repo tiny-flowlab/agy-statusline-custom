@@ -82,12 +82,18 @@ DEBUG=1 node status_line.js           # Print parse errors to stderr
 
 - `/status` — Manually trigger a detailed resource usage report (token counts, context state, subagent status) as a formatted markdown table in chat.
 
-## Installation
+## Installation & Diagnostics
 
 ```bash
-git clone https://github.com/tiny/agy_status_line_plugin.git
-cd agy_status_line_plugin
+# 1. Clone repository
+git clone https://github.com/tiny/agy-status-line.git
+cd agy-status-line
+
+# 2. Run installer
 node install.js
+
+# 3. Run self-diagnostics
+node doctor.js
 ```
 
-The installer auto-detects `~/.gemini/antigravity-cli/settings.json` or `~/.gemini/antigravity/settings.json`, creates a backup, and registers the status line command.
+The installer auto-detects `~/.gemini/antigravity-cli/settings.json` or `~/.gemini/antigravity/settings.json`, creates a backup, and registers the status line command. Use `doctor.js` to ensure the installation succeeded.

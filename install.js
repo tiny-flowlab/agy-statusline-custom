@@ -14,7 +14,7 @@ const possibleSettingsPaths = [
 ];
 
 console.log('─────────────────────────────────────────────────');
-console.log('  agy_status_line_plugin — Installation');
+console.log('  agy-status-line — Installation');
 console.log('─────────────────────────────────────────────────');
 console.log(`  Script path : ${targetScriptPath}`);
 
@@ -59,7 +59,9 @@ try {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
 
   console.log('\n  ✓ Installation complete!');
-  console.log('  → Reload your Antigravity CLI session to activate the status line.\n');
+  console.log('  → Run diagnostics to verify configuration health:');
+  console.log('    node doctor.js');
+  console.log('\n  → Reload your Antigravity CLI session to activate the status line.\n');
   console.log('  Optional: Set a theme via environment variable:');
   console.log('    AGY_STATUS_THEME=aurora    (default — purple/cyan/emerald)');
   console.log('    AGY_STATUS_THEME=cyberpunk (hot-pink/neon/laser-yellow)');
