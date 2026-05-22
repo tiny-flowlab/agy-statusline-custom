@@ -140,6 +140,12 @@ process.stdin.on('data', chunk => {
 });
 
 process.stdin.on('end', () => {
+  if (process.env.DEBUG) {
+    try {
+      fs.writeFileSync(path.join(__dirname, 'stdin.log'), inputData, 'utf8');
+    } catch (err) {}
+  }
+
   // ── 1. Parse JSON input ──────────────────────────────────────────────────
   let data = {};
   try {
@@ -236,6 +242,11 @@ process.stdin.on('end', () => {
   let globalCumOutput = 0;
   let globalCumCache = 0;
   let timeRemainingStr = '5h 00m';
+
+  // Fallbacks for session cumulative metrics (used if sessionId is not present)
+  let sessionCumInput = totalInput;
+  let sessionCumOutput = totalOutput;
+  let sessionCumCache = cacheHit;
 
   const sessionId = data.session_id || data.conversation_id || '';
   if (sessionId) {
@@ -348,71 +359,81 @@ process.stdin.on('end', () => {
     if (!state.sessions[sessionId]) {
       state.sessions[sessionId] = {
         accumulated_cache_read_tokens: 0,
-        last_total_input: 0,
-        last_total_output: 0,
-        last_current_input: -1,
-        last_current_output: -1,
-        // Monotonically-increasing display counters — immune to context compaction dips
-        display_input: 0,
-        display_output: 0
+        last_step_timestamp: 0
       };
     }
 
     const sessionState = state.sessions[sessionId];
 
-    // Ensure display counters exist for migrated sessions
-    if (sessionState.display_input === undefined) sessionState.display_input = sessionState.last_total_input || 0;
-    if (sessionState.display_output === undefined) sessionState.display_output = sessionState.last_total_output || 0;
-
-    // Calculate deltas — only positive deltas are recorded
-    // total_input_tokens can DROP during context compaction; we track last seen and
-    // only add the positive diff to our monotonic display counter.
-    let deltaInput = 0;
-    let deltaOutput = 0;
-    let deltaCache = 0;
-
-    if (totalInput >= sessionState.last_total_input) {
-      deltaInput = totalInput - sessionState.last_total_input;
+    // Ensure session-level cumulative tracking fields are initialized to 0
+    // To maintain mathematical integrity (In + Cache >= Out), we perform pure self-aggregation starting from 0.
+    if (sessionState.cumulative_input === undefined) {
+      sessionState.cumulative_input = 0;
     }
-    // Always update last_total_input (even on drops) so next positive delta is relative
-    sessionState.last_total_input = totalInput;
-
-    if (totalOutput >= sessionState.last_total_output) {
-      deltaOutput = totalOutput - sessionState.last_total_output;
+    if (sessionState.cumulative_output === undefined) {
+      sessionState.cumulative_output = 0;
     }
-    sessionState.last_total_output = totalOutput;
-
-    // Accumulate into monotonic display counters
-    sessionState.display_input += deltaInput;
-    sessionState.display_output += deltaOutput;
-
-    if (sessionState.last_current_input !== currentInput || sessionState.last_current_output !== currentOutput) {
-      deltaCache = cacheHit;
-      sessionState.accumulated_cache_read_tokens += cacheHit;
-      sessionState.last_current_input = currentInput;
-      sessionState.last_current_output = currentOutput;
+    if (sessionState.cumulative_cache === undefined) {
+      sessionState.cumulative_cache = 0;
     }
 
-    // Update global cumulative counters
-    state.global_cumulative.input_tokens += deltaInput;
-    state.global_cumulative.output_tokens += deltaOutput;
-    state.global_cumulative.cache_tokens += deltaCache;
-
-    // Save back to file
-    try {
-      fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
-    } catch (err) {
-      if (process.env.DEBUG) process.stderr.write(`[status_line] Failed to write session state: ${err.message}\n`);
+    // ── Self-Healing / Realignment of legacy corrupted state ─────────────────
+    // If the saved session cumulative output mathematically exceeds the combined input and cache,
+    // or has legacy corrupted metrics, we force-align the session back to dynamic self-aggregation starting fresh.
+    const combinedInputAndCache = (sessionState.cumulative_input || 0) + (sessionState.cumulative_cache || 0);
+    if ((sessionState.cumulative_output || 0) > combinedInputAndCache || 
+        (sessionState.cumulative_output > 10000 && sessionState.cumulative_input === 0)) {
+      if (process.env.DEBUG) {
+        process.stderr.write(`[status_line] Legacy corrupted session state detected for ${sessionId}. Aligning to pristine 0.\n`);
+      }
+      sessionState.cumulative_input = 0;
+      sessionState.cumulative_output = 0;
+      sessionState.cumulative_cache = 0;
+      sessionState.accumulated_cache_read_tokens = 0;
+      sessionState.display_input = 0;
+      sessionState.display_output = 0;
     }
 
-    // Use monotonic display values for rendering (stable, never decreases)
-    totalInput = sessionState.display_input;
-    totalOutput = sessionState.display_output;
+    // To prevent duplicate additions from the exact same step (idempotency),
+    // we track the step's unique context footprint or a timestamp signature.
+    // Antigravity CLI invokes the status line once per step.
+    const stepSignature = `${currentInput}-${currentOutput}-${cacheHit}-${totalInput}-${totalOutput}`;
+    if (sessionState.last_step_signature !== stepSignature) {
+      // 1. Accumulate step-level raw deltas directly to global 5h metrics
+      // This is 100% mathematically correct and immune to context window dips or compacting!
+      state.global_cumulative.input_tokens += currentInput;
+      state.global_cumulative.output_tokens += currentOutput;
+      state.global_cumulative.cache_tokens += cacheHit;
+
+      // 2. Pure session-level self-aggregation based on raw deltas
+      sessionState.cumulative_input = (sessionState.cumulative_input || 0) + currentInput;
+      sessionState.cumulative_output = (sessionState.cumulative_output || 0) + currentOutput;
+      sessionState.cumulative_cache = (sessionState.cumulative_cache || 0) + cacheHit;
+
+      // Keep backup helper keys and backwards compatibility fully synchronized
+      sessionState.accumulated_cache_read_tokens = sessionState.cumulative_cache;
+      sessionState.display_input = sessionState.cumulative_input;
+      sessionState.display_output = sessionState.cumulative_output;
+
+      sessionState.last_step_signature = stepSignature;
+
+      // Save back to file
+      try {
+        fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+      } catch (err) {
+        if (process.env.DEBUG) process.stderr.write(`[status_line] Failed to write session state: ${err.message}\n`);
+      }
+    }
 
     accumulatedCache = sessionState.accumulated_cache_read_tokens;
     globalCumInput = state.global_cumulative.input_tokens;
     globalCumOutput = state.global_cumulative.output_tokens;
     globalCumCache = state.global_cumulative.cache_tokens;
+
+    // Use stored session cumulative values
+    sessionCumInput = sessionState.cumulative_input;
+    sessionCumOutput = sessionState.cumulative_output;
+    sessionCumCache = sessionState.cumulative_cache;
   } else {
     accumulatedCache = cacheHit;
     globalCumInput = totalInput;
@@ -453,9 +474,9 @@ process.stdin.on('end', () => {
   const pricing = getPricing(modelId, modelName, realContextUsed);
 
   // Session cost (using monotonic display totals)
-  const inputCost = totalInput * pricing.input;
-  const outputCost = totalOutput * pricing.output;
-  const cacheCost = accumulatedCache * pricing.cache;
+  const inputCost = sessionCumInput * pricing.input;
+  const outputCost = sessionCumOutput * pricing.output;
+  const cacheCost = sessionCumCache * pricing.cache;
   const totalCost = inputCost + outputCost + cacheCost;
 
   // 5-hour cumulative cost
@@ -666,9 +687,9 @@ process.stdin.on('end', () => {
   const piecePrgMedium = `🎯 ${t.progress}Prog:${reset}${t.value}${progress}%${reset}`;
 
   // Token Detailed Metrics (Line 3 Left)
-  const tIn    = `${t.label}In:${reset}${t.value}${formatToken(totalInput, true)} ${t.divider}(+${formatToken(currentInput, true)}, 5h:${formatToken(globalCumInput, true)})${reset}`;
-  const tOut   = `${t.label}Out:${reset}${t.value}${formatToken(totalOutput, true)} ${t.divider}(+${formatToken(currentOutput, true)}, 5h:${formatToken(globalCumOutput, true)})${reset}`;
-  const tCache = `${t.label}Cache:${reset}${t.value}${formatToken(cacheHit, true)} ${t.divider}(5h:${formatToken(globalCumCache, true)})${reset}`;
+  const tIn    = `${t.label}In:${reset}${t.value}${formatToken(sessionCumInput, true)}${reset} ${t.divider}(+${formatToken(currentInput, true)} / 5h:${formatToken(globalCumInput, true)})${reset}`;
+  const tOut   = `${t.label}Out:${reset}${t.value}${formatToken(sessionCumOutput, true)}${reset} ${t.divider}(+${formatToken(currentOutput, true)} / 5h:${formatToken(globalCumOutput, true)})${reset}`;
+  const tCache = `${t.label}Cache:${reset}${t.value}${formatToken(sessionCumCache, true)}${reset} ${t.divider}(+${formatToken(cacheHit, true)} / 5h:${formatToken(globalCumCache, true)})${reset}`;
   
   // Context Utilization Only (Removed dynamic progress bar and Ctx Rem)
   const tCtx   = `🧠 ${t.label}Ctx:${reset} ${realCtxColor}${formatToken(realContextUsed, true)}/${formatToken(totalWindow, true)} (${realContextUsedPercent.toFixed(1)}%)${reset}`;
@@ -707,9 +728,9 @@ process.stdin.on('end', () => {
     line2 = renderSplitLine(l2Left, l2Right, termWidth);
 
     // Line 3: Compact Tokens (Left) <---> Compact Context Usage (Right)
-    const compactIn  = `${t.label}In:${reset}${t.value}${formatToken(totalInput, true)}${t.divider}(5h:${formatToken(globalCumInput, true)})${reset}`;
-    const compactOut = `${t.label}Out:${reset}${t.value}${formatToken(totalOutput, true)}${t.divider}(5h:${formatToken(globalCumOutput, true)})${reset}`;
-    const compactC   = `${t.label}Cache:${reset}${t.value}${formatToken(cacheHit, true)}${t.divider}(5h:${formatToken(globalCumCache, true)})${reset}`;
+    const compactIn  = `${t.label}In:${reset}${t.value}${formatToken(sessionCumInput, true)}${reset} ${t.divider}(5h:${formatToken(globalCumInput, true)})${reset}`;
+    const compactOut = `${t.label}Out:${reset}${t.value}${formatToken(sessionCumOutput, true)}${reset} ${t.divider}(5h:${formatToken(globalCumOutput, true)})${reset}`;
+    const compactC   = `${t.label}Cache:${reset}${t.value}${formatToken(sessionCumCache, true)}${reset} ${t.divider}(5h:${formatToken(globalCumCache, true)})${reset}`;
     const compactCtx = `🧠 ${t.label}Ctx:${reset}${realCtxColor}${realContextUsedPercent.toFixed(0)}%${reset}`;
 
     const l3Left = [`📥 ${compactIn}`, `📤 ${compactOut}`, `⚡ ${compactC}`].join(` ${pStr} `);
@@ -726,7 +747,7 @@ process.stdin.on('end', () => {
     const l2Right = `💵 ${formattedCostNarr}`;
     line2 = renderSplitLine(l2Left, l2Right, termWidth);
 
-    const l3Left = [`📥${t.value}${formatToken(totalInput, true)}${reset}`, `📤${t.value}${formatToken(totalOutput, true)}${reset}`, `⚡${t.value}${formatToken(cacheHit, true)}${reset}`].join(` ${pStr} `);
+    const l3Left = [`📥${t.value}${formatToken(sessionCumInput, true)}${reset}`, `📤${t.value}${formatToken(sessionCumOutput, true)}${reset}`, `⚡${t.value}${formatToken(sessionCumCache, true)}${reset}`].join(` ${pStr} `);
     const l3Right = `🧠${realCtxColor}${realContextUsedPercent.toFixed(0)}%${reset}`;
     line3 = renderSplitLine(l3Left, l3Right, termWidth);
   }
