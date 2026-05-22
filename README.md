@@ -23,7 +23,7 @@
 ```
 🧠 Thinking [Google AI Enterprise]          ⏳ Subagents: 0 | ⚙️ Tasks: 0 | 🎨 Art: 4 | 🎯 Progress: 80%
 🤖 [Gemini 2.5 Flash]                                         💵 $1.18 (5h: $7.28 [4h 53m left])
-📥 In:120.5k (+5.2k, 5h:938k) | 📤 Out:45k (+1.2k, 5h:578k) | ⚡ Cache:50k (5h:4.5M)    🧠 Ctx: 165.5k/2.1M (7.9%)
+📥 In:120.5k (+5.2k / 5h:938k) | 📤 Out:45k (+1.2k / 5h:578k) | ⚡ Cache:50k (+50k / 5h:4.5M)    🧠 Ctx: 165.5k/2.1M (7.9%)
 ```
 
 > Colors are rendered in your terminal via ANSI escape codes. The preview above is a plain-text representation.
@@ -96,7 +96,7 @@ export AGY_STATUS_THEME=cyberpunk
 
 ### Line 3 — Token & Context
 ```
-📥 In:{input} (+{delta}, 5h:{cum}) | 📤 Out:{output} | ⚡ Cache:{cache}    🧠 Ctx: {used}/{total} ({pct}%)
+📥 In:{input} (+{delta} / 5h:{cum}) | 📤 Out:{output} (+{delta} / 5h:{cum}) | ⚡ Cache:{cache} (+{delta} / 5h:{cum})    🧠 Ctx: {used}/{total} ({pct}%)
 ```
 
 **Split-Justified**: Each line uses ANSI-aware padding to align content flush against both the left and right terminal margins.
@@ -111,6 +111,7 @@ Gemini API usage resets on a **5-hour rolling window**. This plugin:
 2. Aggregates usage across **all active sessions** into a global `global_cumulative` counter
 3. Automatically resets the window after 5 hours
 4. Displays remaining time until next reset: `[4h 53m left]`
+5. **Self-Healing & Idempotency** — Automatically heals legacy or mathematically corrupted session states, and uses step signature deduplication to prevent double-counting of token usage.
 
 ### Cost Formula (Gemini 3 Series)
 

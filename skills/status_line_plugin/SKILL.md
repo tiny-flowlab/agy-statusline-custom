@@ -23,7 +23,7 @@ The status bar renders as 3 lines, each split-justified (left and right aligned 
 
 ### Line 3 — Token & Context
 ```
-📥 In:{input} (+{delta}, 5h:{cum}) | 📤 Out:{output} | ⚡ Cache:{cache}    🧠 Ctx: {used}/{total} ({pct}%)
+📥 In:{input} (+{delta} / 5h:{cum}) | 📤 Out:{output} (+{delta} / 5h:{cum}) | ⚡ Cache:{cache} (+{delta} / 5h:{cum})    🧠 Ctx: {used}/{total} ({pct}%)
 ```
 
 ## Field Reference
@@ -41,9 +41,9 @@ The status bar renders as 3 lines, each split-justified (left and right aligned 
 | `⚙️ Tasks` | Number of active background tasks (PPID-based) |
 | `🎨 Art` | Count of artifacts generated in this conversation |
 | `🎯 Progress` | task.md checklist completion percentage |
-| `📥 In` | Cumulative input token count (+ current step delta) |
-| `📤 Out` | Cumulative output token count (+ current step delta) |
-| `⚡ Cache` | Cache-read token count for current step (5h cumulative total) |
+| `📥 In` | Current session cumulative input token count (+ current step delta / 5h cumulative total) |
+| `📤 Out` | Current session cumulative output token count (+ current step delta / 5h cumulative total) |
+| `⚡ Cache` | Current session cumulative cache-read token count (+ current step delta / 5h cumulative total) |
 | `🧠 Ctx` | Context window utilization: used tokens / total size (%) |
 
 ## Color Behavior
