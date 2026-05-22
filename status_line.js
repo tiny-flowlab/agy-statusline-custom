@@ -263,28 +263,63 @@ process.stdin.on('end', () => {
     }
 
     const currentTime = Date.now();
-    const FIVE_HOURS = 5 * 60 * 60 * 1000;
+
+    // ── Fixed Hourly Anchor System ──────────────────────────────────────────
+    // Anchors daily reset blocks to exact user-expected hours.
+    // 00:00 - 04:00 (4h) | 04:00 - 09:00 (5h) | 09:00 - 14:00 (5h) | 14:00 - 19:00 (5h) | 19:00 - 00:00 (5h)
+    function getAnchorStartTime(ms) {
+      const d = new Date(ms);
+      const hours = d.getHours();
+      const anchors = [0, 4, 9, 14, 19];
+      let matchedHour = 0;
+      for (let i = anchors.length - 1; i >= 0; i--) {
+        if (hours >= anchors[i]) {
+          matchedHour = anchors[i];
+          break;
+        }
+      }
+      const anchorDate = new Date(ms);
+      anchorDate.setHours(matchedHour, 0, 0, 0);
+      return anchorDate.getTime();
+    }
+
+    function getNextAnchorTime(currentAnchorMs) {
+      const d = new Date(currentAnchorMs);
+      const hour = d.getHours();
+      const nextMap = { 0: 4, 4: 9, 9: 14, 14: 19, 19: 24 };
+      const nextHour = nextMap[hour] !== undefined ? nextMap[hour] : (hour + 5);
+      
+      const nextDate = new Date(currentAnchorMs);
+      if (nextHour === 24) {
+        nextDate.setDate(nextDate.getDate() + 1);
+        nextDate.setHours(0, 0, 0, 0);
+      } else {
+        nextDate.setHours(nextHour, 0, 0, 0);
+      }
+      return nextDate.getTime();
+    }
+
+    const currentAnchorStart = getAnchorStartTime(currentTime);
+    const nextAnchorStart = getNextAnchorTime(currentAnchorStart);
 
     if (!state.global_cumulative) {
       state.global_cumulative = {
-        window_start_time: currentTime,
+        window_start_time: currentAnchorStart,
         input_tokens: 0,
         output_tokens: 0,
         cache_tokens: 0
       };
     }
 
-    // Check 5-hour window reset
-    let timeElapsed = currentTime - state.global_cumulative.window_start_time;
-    if (timeElapsed >= FIVE_HOURS || timeElapsed < 0) {
-      state.global_cumulative.window_start_time = currentTime;
+    // Reset window if stored start time does not match current anchor block start
+    if (state.global_cumulative.window_start_time !== currentAnchorStart) {
+      state.global_cumulative.window_start_time = currentAnchorStart;
       state.global_cumulative.input_tokens = 0;
       state.global_cumulative.output_tokens = 0;
       state.global_cumulative.cache_tokens = 0;
-      timeElapsed = 0;
     }
 
-    const timeRemainingMs = Math.max(0, FIVE_HOURS - timeElapsed);
+    const timeRemainingMs = Math.max(0, nextAnchorStart - currentTime);
     const remHours = Math.floor(timeRemainingMs / (60 * 60 * 1000));
     const remMinutes = Math.floor((timeRemainingMs % (60 * 60 * 1000)) / (60 * 1000));
     timeRemainingStr = `${remHours}h ${remMinutes}m`;
