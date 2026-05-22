@@ -386,40 +386,36 @@ process.stdin.on('end', () => {
   }
 
   // ── Model-Aware Pricing ──────────────────────────────────────────────────
-  // Rates per token (USD). Source: Google AI pricing (May 2025).
-  // Tiered pricing (e.g. >200k context surcharges) is simplified to base tier.
-  function getPricing(modelId, displayName) {
+  // Rates per token (USD). Source: Google AI Studio & Vertex AI pricing (2026).
+  function getPricing(modelId, displayName, contextTokens) {
     const id = (modelId || displayName || '').toLowerCase();
-    // Gemini 2.5 Pro
-    if (id.includes('2.5') && id.includes('pro')) {
-      return { input: 1.25 / 1e6, output: 10.00 / 1e6, cache: 0.315 / 1e6 };
+    
+    // 1. Gemini 3.1 Pro (tiered pricing based on context length)
+    if (id.includes('3.1') && id.includes('pro')) {
+      const isOver200k = (contextTokens || 0) > 200000;
+      if (isOver200k) {
+        return { input: 4.00 / 1e6, output: 18.00 / 1e6, cache: 0.40 / 1e6 };
+      } else {
+        return { input: 2.00 / 1e6, output: 12.00 / 1e6, cache: 0.20 / 1e6 };
+      }
     }
-    // Gemini 2.5 Flash (includes thinking variants)
-    if (id.includes('2.5') && id.includes('flash')) {
-      return { input: 0.30 / 1e6, output: 3.50 / 1e6, cache: 0.075 / 1e6 };
+    
+    // 2. Gemini 3.1 Flash
+    if (id.includes('3.1') && id.includes('flash')) {
+      return { input: 0.25 / 1e6, output: 1.50 / 1e6, cache: 0.025 / 1e6 };
     }
-    // Gemini 2.0 Flash / Flash-Lite / Flash-Exp
-    if (id.includes('2.0') && id.includes('flash')) {
-      return { input: 0.10 / 1e6, output: 0.40 / 1e6, cache: 0.025 / 1e6 };
+    
+    // 3. Gemini 3.5 Flash (both Medium and High reasoning levels)
+    if (id.includes('3.5') && id.includes('flash')) {
+      return { input: 1.50 / 1e6, output: 9.00 / 1e6, cache: 0.15 / 1e6 };
     }
-    // Gemini 1.5 Pro
-    if (id.includes('1.5') && id.includes('pro')) {
-      return { input: 1.25 / 1e6, output: 5.00 / 1e6, cache: 0.3125 / 1e6 };
-    }
-    // Gemini 1.5 Flash
-    if (id.includes('1.5') && id.includes('flash')) {
-      return { input: 0.075 / 1e6, output: 0.30 / 1e6, cache: 0.01875 / 1e6 };
-    }
-    // Gemini 1.0 Pro / Gemini Pro
-    if ((id.includes('1.0') || !id.includes('.')) && id.includes('pro')) {
-      return { input: 0.50 / 1e6, output: 1.50 / 1e6, cache: 0.00 / 1e6 };
-    }
-    // Default fallback: Gemini 2.5 Flash rates
-    return { input: 0.30 / 1e6, output: 3.50 / 1e6, cache: 0.075 / 1e6 };
+    
+    // Default fallback: Gemini 3.5 Flash rates
+    return { input: 1.50 / 1e6, output: 9.00 / 1e6, cache: 0.15 / 1e6 };
   }
 
   const modelId = (data.model && data.model.id) || '';
-  const pricing = getPricing(modelId, modelName);
+  const pricing = getPricing(modelId, modelName, realContextUsed);
 
   // Session cost (using monotonic display totals)
   const inputCost = totalInput * pricing.input;

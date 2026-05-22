@@ -112,13 +112,16 @@ Gemini API usage resets on a **5-hour rolling window**. This plugin:
 3. Automatically resets the window after 5 hours
 4. Displays remaining time until next reset: `[4h 53m left]`
 
-### Cost Formula
+### Cost Formula (Gemini 3 Series)
 
-| Token Type | Rate |
-|---|---|
-| Input | $1.50 / 1M tokens |
-| Output | $9.00 / 1M tokens |
-| Cache Read | $0.15 / 1M tokens |
+Pricing is dynamically selected based on the active model and context size:
+
+| Model | Input Rate (per 1M) | Output Rate (per 1M) | Cache Read (per 1M) |
+|---|---|---|---|
+| **Gemini 3.5 Flash** (Medium / High) | $1.50 | $9.00 | $0.15 |
+| **Gemini 3.1 Pro** (Context ≤ 200k) | $2.00 | $12.00 | $0.20 |
+| **Gemini 3.1 Pro** (Context > 200k) | $4.00 | $18.00 | $0.40 |
+| **Gemini 3.1 Flash** (Flash-Lite) | $0.25 | $1.50 | $0.025 |
 
 ---
 
