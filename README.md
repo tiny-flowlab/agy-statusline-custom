@@ -182,6 +182,22 @@ agy-status-line/
 
 ---
 
+## 📝 Changelog
+
+### v0.4.0
+- **Real-time Live Quota Tracking** — Integrates dynamic rate-limit estimations based on 5-hour rolling token consumption and 1-minute RPM/TPM thresholds.
+- **Quota Reset Countdown** — Tracks ground-truth `resetTime` provided by the API and renders remaining time dynamically on the status bar (e.g. `Reset: Xh Ym`).
+- **Collapsible Bilingual Layout** — Revamped README to be English base with a collapsible Korean documentation block to improve readability.
+- **Improved Script Integrity Diagnostics** — Upgraded `doctor.js` to run robust integrity and permission checks.
+
+### v0.3.0
+- Active subagent telemetry parsing conversation transcripts.
+- Real-time `task.md` progress checklist percentage calculations.
+- Context utilization dial showing total input/output vs context limits.
+- Sliding 5-hour window cost tracking database with session auto-resets.
+
+---
+
 ## 👤 Credits & Support
 - **Author**: **Tiny**
 - **Website**: [tiny-flowlab.com](https://tiny-flowlab.com)
@@ -351,6 +367,22 @@ agy-status-line/
     └── status_line_plugin/
         └── SKILL.md            # 에이전트 연동용 status_line_plugin 스킬 파일
 ```
+
+---
+
+## 📝 업데이트 내역 (Changelog)
+
+### v0.4.0
+- **실시간 API 잔여 쿼터 측정** — 최근 5시간 누적 토큰 소비 및 1분당 RPM/TPM 처리 제한 병목에 기반한 실시간 잔여 사용 쿼터 추적 기능 탑재.
+- **쿼터 리셋 카운트다운** — API가 제공하는 ground-truth `resetTime`을 파싱하여 상태창에 실시간 리셋 대기 시간 표기 (예: `Reset: Xh Ym`).
+- **접이식 다국어 문서 레이아웃 개편** — 영어 문서를 기본 노출하고, 한국어 설명서는 접이식 `<details>` 블록으로 감싸 가독성 향상.
+- **환경 자가 검사 도구 고도화** — `doctor.js` 스크립트 무결성 진단 검사 및 정적 권한 감사 기능 강화.
+
+### v0.3.0
+- 대화 트랜스크립트 파싱 기반의 가동 서브에이전트 수 실시간 감지 기능.
+- `task.md` 할 일 체크리스트 연동 기반의 에이전트 실시간 태스크 완수율(%) 표시.
+- 입출력 토큰 비중 및 컨텍스트 상한 대비 실시간 가용량 비율 알림 연동.
+- 5시간 슬라이딩 윈도우 기반 누적 요금 추적 및 에이전트 신규 세션 자동 리셋 지원.
 
 ---
 
