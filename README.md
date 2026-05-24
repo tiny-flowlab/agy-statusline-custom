@@ -7,7 +7,7 @@
 [![Author: Tiny](https://img.shields.io/badge/Author-Tiny-00f0ff?style=for-the-badge&logo=visual-studio-code)](https://tiny-flowlab.com)
 [![Website: tiny-flowlab.com](https://img.shields.io/badge/Website-tiny--flowlab.com-10b981?style=for-the-badge&logo=google-chrome)](https://tiny-flowlab.com)
 [![Antigravity: Plugin](https://img.shields.io/badge/Antigravity-Plugin-8b5cf6?style=for-the-badge&logo=terminal)](https://github.com/antigravity)
-[![Version](https://img.shields.io/badge/Version-0.3.0-3b82f6?style=for-the-badge)](https://github.com/tiny-flowlab/agy-statusline-custom)
+[![Version](https://img.shields.io/badge/Version-0.4.0-3b82f6?style=for-the-badge)](https://github.com/tiny-flowlab/agy-statusline-custom)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b?style=for-the-badge)](LICENSE)
 
 </div>
@@ -15,8 +15,8 @@
 ---
 
 ## 🌐 Language Navigation
-* 🇺🇸 **[English Documentation](#-english-documentation)**
-* 🇰🇷 **[한국어 설명서](#-한국어-설명서)**
+* 🇺🇸 **[English Documentation](#-english-documentation)** *(default below)*
+* 🇰🇷 **[한국어 설명서](#-한국어-설명서)** *(expandable at bottom)*
 
 ---
 
@@ -34,6 +34,7 @@
 - **Active Subagent Telemetry** — Live monitors and counts running subagents by parsing conversation transcripts.
 - **Task.md Sync** — Computes and renders real-time progress checklist percentages directly onto the status bar.
 - **Context Utilization Dial** — Visualizes total input/output vs. absolute context limit with dynamic amber/red alert thresholds.
+- **Live Quota & Reset Tracker** — Computes and estimates real-time remaining API quota (rolling 5-hour safety limit & 1-minute RPM/TPM rate limits) with precise countdown reset countdowns on the status bar.
 - **4 Custom Themes** — `aurora` (DeepMind default), `cyberpunk`, `classic`, and `minimal`.
 
 ---
@@ -42,7 +43,7 @@
 
 ```
 🧠 Thinking [Google AI Enterprise]          ⏳ Subagents: 0 | ⚙️ Tasks: 0 | 🎨 Art: 4 | 🎯 Progress: 80%
-🤖 [Gemini 2.5 Flash]                                         💵 $1.18 (5h: $7.28 [4h 53m left])
+🤖 [Gemini 2.5 Flash | ⚡ Quota:92.4%/100.0% (Reset: 4h 53m)] 💵 $1.18 (5h: $7.28 [4h 53m left])
 📥 In:120.5k (+5.2k / 5h:938k) | 📤 Out:45k (+1.2k / 5h:578k) | ⚡ Cache:50k (+50k / 5h:4.5M)    🧠 Ctx: 165.5k/2.1M (7.9%)
 ```
 
@@ -188,6 +189,10 @@ agy-status-line/
 
 ---
 
+<details>
+<summary>🇰🇷 <b>한국어 설명서 (Click to expand Korean version)</b></summary>
+<br>
+
 <div id="한국어-설명서"></div>
 
 # 🇰🇷 한국어 설명서
@@ -202,6 +207,7 @@ agy-status-line/
 - **서브에이전트 텔레메트리** — 실시간 백그라운드에서 가동 중인 서브에이전트 개수를 실시간 파싱하여 표기합니다.
 - **Task.md 진행률 동기화** — 작업 디렉토리의 `task.md` 할 일 목록 완수 비율(%)을 실시간 계산하여 출력합니다.
 - **컨텍스트 위젯** — 전체 사용 토큰량 대 컨텍스트 한계 용량을 동적 경고 임계치(황색/적색)와 함께 비율로 시각화합니다.
+- **실시간 잔여 쿼터 및 리셋 카운트다운** — 최근 5시간 누적 토큰 소비 및 1분당 RPM/TPM 처리 한도를 실시간 종합 분석하여 잔여 사용 쿼터 비율 및 리셋까지의 시간을 실시간 표기합니다.
 - **4가지 프리미엄 디자인 테마** — `aurora` (기본값), `cyberpunk`, `classic`, `minimal`을 제공합니다.
 
 ---
@@ -210,7 +216,7 @@ agy-status-line/
 
 ```
 🧠 Thinking [Google AI Enterprise]          ⏳ Subagents: 0 | ⚙️ Tasks: 0 | 🎨 Art: 4 | 🎯 Progress: 80%
-🤖 [Gemini 2.5 Flash]                                         💵 $1.18 (5h: $7.28 [4h 53m left])
+🤖 [Gemini 2.5 Flash | ⚡ Quota:92.4%/100.0% (Reset: 4h 53m)] 💵 $1.18 (5h: $7.28 [4h 53m left])
 📥 In:120.5k (+5.2k / 5h:938k) | 📤 Out:45k (+1.2k / 5h:578k) | ⚡ Cache:50k (+50k / 5h:4.5M)    🧠 Ctx: 165.5k/2.1M (7.9%)
 ```
 
@@ -352,4 +358,6 @@ agy-status-line/
 - **작업자 (Developer)**: **Tiny**
 - **공식 웹사이트 (Website)**: [tiny-flowlab.com](https://tiny-flowlab.com)
 - **라이선스 (License)**: [MIT License](LICENSE)를 준수합니다.
+
+</details>
 

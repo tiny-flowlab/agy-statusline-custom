@@ -3,6 +3,131 @@ const path = require('path');
 const os = require('os');                        // FIX #1: use os.homedir() instead of hardcoded path
 const { execSync } = require('child_process');
 
+async function fetchRealQuota(activeModelId, projectId) {
+  const homeDir = os.homedir() || os.tmpdir() || '';
+  const tokenPath = path.join(homeDir, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+
+  if (!fs.existsSync(tokenPath)) {
+    if (process.env.DEBUG) process.stderr.write(`[status_line] Token file not found at ${tokenPath}\n`);
+    return null;
+  }
+
+  let tokenData;
+  try {
+    const fileContent = fs.readFileSync(tokenPath, 'utf8');
+    tokenData = JSON.parse(fileContent);
+  } catch (err) {
+    if (process.env.DEBUG) process.stderr.write(`[status_line] Failed to parse token: ${err.message}\n`);
+    return null;
+  }
+
+  if (!tokenData || !tokenData.token || !tokenData.token.access_token) {
+    if (process.env.DEBUG) process.stderr.write(`[status_line] No access token in token file\n`);
+    return null;
+  }
+
+  const accessToken = tokenData.token.access_token;
+  let pId = projectId || process.env.ANTIGRAVITY_PROJECT_ID || 'shaped-array-sg251';
+  let projectField = pId;
+  if (pId && !pId.startsWith('projects/')) {
+    projectField = `projects/${pId}`;
+  }
+
+  const url = 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota';
+  
+  if (process.env.DEBUG) {
+    process.stderr.write(`[status_line] Querying retrieveUserQuota for project: ${projectField}\n`);
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ project: projectField }),
+      signal: AbortSignal.timeout(1200)
+    });
+
+    if (!response.ok) {
+      if (process.env.DEBUG) process.stderr.write(`[status_line] retrieveUserQuota HTTP error: ${response.status}\n`);
+      return null;
+    }
+
+    const data = await response.json();
+    if (!data || !data.buckets || !Array.isArray(data.buckets)) {
+      if (process.env.DEBUG) process.stderr.write(`[status_line] Invalid quota response format\n`);
+      return null;
+    }
+
+    const model = (activeModelId || '').toLowerCase();
+    const getVersion = (str) => {
+      const match = str.match(/(\d+(?:\.\d+)?)/);
+      return match ? parseFloat(match[1]) : null;
+    };
+    const activeVer = getVersion(model);
+
+    let bucket = null;
+
+    // 1. Precise match with version guard
+    bucket = data.buckets.find(b => {
+      const bId = b.modelId.toLowerCase();
+      const nameMatch = model.includes(bId) || bId.includes(model);
+      if (!nameMatch) return false;
+      if (activeVer) {
+        const bVer = getVersion(bId);
+        if (bVer && bVer !== activeVer) return false;
+      }
+      return true;
+    });
+
+    // 2. Version-aligned type fallback (flash vs pro)
+    if (!bucket) {
+      if (model.includes('flash')) {
+        bucket = data.buckets.find(b => {
+          const bId = b.modelId.toLowerCase();
+          if (!bId.includes('flash')) return false;
+          if (activeVer) {
+            const bVer = getVersion(bId);
+            if (bVer && bVer !== activeVer) return false;
+          }
+          return true;
+        });
+      } else if (model.includes('pro')) {
+        bucket = data.buckets.find(b => {
+          const bId = b.modelId.toLowerCase();
+          if (!bId.includes('pro')) return false;
+          if (activeVer) {
+            const bVer = getVersion(bId);
+            if (bVer && bVer !== activeVer) return false;
+          }
+          return true;
+        });
+      }
+    }
+
+    // 3. Absolute fallback only if model is unversioned
+    if (!bucket && !activeVer) {
+      bucket = data.buckets.find(b => b.modelId === 'gemini-3.1-pro-preview') || data.buckets[0];
+    }
+
+    if (bucket) {
+      if (process.env.DEBUG) {
+        process.stderr.write(`[status_line] Matched bucket: ${bucket.modelId}, remainingFraction: ${bucket.remainingFraction}\n`);
+      }
+      return {
+        remainingFraction: Number.isFinite(bucket.remainingFraction) ? bucket.remainingFraction : 1.0,
+        resetTime: bucket.resetTime || ''
+      };
+    }
+  } catch (err) {
+    if (process.env.DEBUG) process.stderr.write(`[status_line] Error in fetchRealQuota: ${err.message}\n`);
+  }
+
+  return null;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 // Calculate actual screen character length excluding ANSI escape codes
@@ -139,12 +264,10 @@ process.stdin.on('data', chunk => {
   inputData += chunk;
 });
 
-process.stdin.on('end', () => {
-  if (process.env.DEBUG) {
-    try {
-      fs.writeFileSync(path.join(__dirname, 'stdin.log'), inputData, 'utf8');
-    } catch (err) {}
-  }
+process.stdin.on('end', async () => {
+  try {
+    fs.writeFileSync(path.join(__dirname, 'stdin.log'), inputData, 'utf8');
+  } catch (err) {}
 
   // ── 1. Parse JSON input ──────────────────────────────────────────────────
   let data = {};
@@ -159,6 +282,26 @@ process.stdin.on('end', () => {
     if (process.env.DEBUG) process.stderr.write(`[status_line] JSON parse error: ${e.message}\n`);
   }
 
+  const activeModelId = (data.model && data.model.id) || '';
+  let modelName = 'Gemini';
+  if (data.model && data.model.display_name) {
+    modelName = data.model.display_name;
+  } else if (data.model && data.model.id) {
+    modelName = data.model.id;
+  }
+
+  let realQuota = null;
+  try {
+    realQuota = await fetchRealQuota(modelName || activeModelId, process.env.ANTIGRAVITY_PROJECT_ID);
+  } catch (err) {
+    if (process.env.DEBUG) process.stderr.write(`[status_line] fetchRealQuota failed: ${err.message}\n`);
+  }
+
+  let serverQuotaPercent = null;
+  if (realQuota !== null) {
+    serverQuotaPercent = realQuota.remainingFraction * 100;
+  }
+
   const themeName = (process.env.AGY_STATUS_THEME || 'aurora').toLowerCase();
   const theme = Object.prototype.hasOwnProperty.call(THEMES, themeName) ? THEMES[themeName] : THEMES.aurora;
   const reset = ansi('\x1b[0m');
@@ -166,12 +309,7 @@ process.stdin.on('end', () => {
   for (const [k, v] of Object.entries(theme)) t[k] = ansi(v);
 
   // ── 2. Model name ────────────────────────────────────────────────────────
-  let modelName = 'Gemini';
-  if (data.model && data.model.display_name) {
-    modelName = data.model.display_name;
-  } else if (data.model && data.model.id) {
-    modelName = data.model.id;
-  }
+  // modelName and activeModelId parsed above for fetchRealQuota
 
   // ── 3. Agent state & Artifact count (NEW: from stdin fields) ─────────────
   const rawState = (typeof data.agent_state === 'string' ? data.agent_state : 'idle').toLowerCase();
@@ -189,6 +327,8 @@ process.stdin.on('end', () => {
   let remainingPercent = 100;
   let realContextUsed = 0;
   let realContextUsedPercent = 0;
+  let liveQuotaPercent = 100;
+  let baseQuotaPercent = 100;
 
   if (data.context_window) {
     totalInput  = data.context_window.total_input_tokens  || 0;
@@ -234,6 +374,7 @@ process.stdin.on('end', () => {
     // FIX #3: clamp remainingPercent so toFixed() / repeat() never see NaN or Infinity
     if (!isFinite(remainingPercent)) remainingPercent = 100;
     remainingPercent = Math.max(0, Math.min(100, remainingPercent));
+    baseQuotaPercent = remainingPercent;
   }
 
   // Load session state to accumulate usage
@@ -301,16 +442,153 @@ process.stdin.on('end', () => {
         cumulative_cache: 0,
         display_input: 0,
         display_output: 0,
-        last_step_signature: ''
+        last_step_signature: '',
+        starting_quota: serverQuotaPercent !== null ? serverQuotaPercent : remainingPercent
       };
     }
 
     const sessionState = state.sessions[sessionId];
+    if (sessionState.starting_quota === undefined || isNaN(sessionState.starting_quota) || (serverQuotaPercent !== null && sessionState.starting_quota === 100)) {
+      sessionState.starting_quota = serverQuotaPercent !== null ? serverQuotaPercent : remainingPercent;
+    }
 
     // Ensure session-level cumulative tracking fields are initialized to 0
     if (sessionState.cumulative_input === undefined) sessionState.cumulative_input = 0;
     if (sessionState.cumulative_output === undefined) sessionState.cumulative_output = 0;
     if (sessionState.cumulative_cache === undefined) sessionState.cumulative_cache = 0;
+
+    // ── Real-Time Auto-Calibration from history.jsonl ──────────────────────────
+    try {
+      const historyPath = '/home/tiny/.gemini/antigravity-cli/history.jsonl';
+      if (fs.existsSync(historyPath)) {
+        const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n');
+        if (lines.length > 0) {
+          const lastLineJson = JSON.parse(lines[lines.length - 1]);
+          const lastMsg = lastLineJson.display || '';
+          const lastMsgTime = lastLineJson.timestamp || 0;
+
+          // Check if we already processed this message
+          if (lastMsgTime && (!sessionState.last_sync_timestamp || sessionState.last_sync_timestamp < lastMsgTime)) {
+            // Check for explicit sync command or natural language calibration patterns
+            // e.g. "60%" and "2시간 52분" or "2h 52m"
+            const percentMatch = lastMsg.match(/(\d+(?:\.\d+)?)%/);
+            
+            let hours = 0;
+            let minutes = 0;
+            let timeFound = false;
+
+            if (percentMatch) {
+              const targetPercent = parseFloat(percentMatch[1]);
+              
+              // Try parsing time: "X시간 Y분" or "Xh Ym"
+              const fullTimeMatch = lastMsg.match(/(\d+)\s*(?:시간|h)\s*(\d+)\s*(?:분|m)/i);
+              if (fullTimeMatch) {
+                hours = parseInt(fullTimeMatch[1], 10);
+                minutes = parseInt(fullTimeMatch[2], 10);
+                timeFound = true;
+              } else {
+                // Just "X시간" or "Xh"
+                const hourMatch = lastMsg.match(/(\d+)\s*(?:시간|h)/i);
+                if (hourMatch) {
+                  hours = parseInt(hourMatch[1], 10);
+                  timeFound = true;
+                }
+                // Just "Y분" or "Ym"
+                const minMatch = lastMsg.match(/(\d+)\s*(?:분|m)/i);
+                if (minMatch) {
+                  minutes = parseInt(minMatch[1], 10);
+                  timeFound = true;
+                }
+              }
+
+              if (timeFound || lastMsg.includes('usage') || lastMsg.includes('quota') || lastMsg.includes('sync')) {
+                const remainingMinutes = (hours * 60) + minutes;
+                const remainingMs = remainingMinutes * 60 * 1000;
+                
+                // Align starting_quota
+                sessionState.starting_quota = targetPercent;
+                // Reset session-level cumulative counters to start fresh from the calibrated point
+                sessionState.cumulative_input = 0;
+                sessionState.cumulative_output = 0;
+                sessionState.cumulative_cache = 0;
+                sessionState.accumulated_cache_read_tokens = 0;
+                sessionState.display_input = 0;
+                sessionState.display_output = 0;
+                
+                // Calculate historical load to allow natural aging-out recovery of sliding window
+                const safetyLimitDenominator = 10000000;
+                const consumedPercent = 100 - targetPercent;
+                const dummyTokens = Math.max(0, Math.floor((consumedPercent / 100) * safetyLimitDenominator));
+
+                // Align reset timer in global history
+                const targetOldestLogTime = currentTime + remainingMs - (5 * 60 * 60 * 1000);
+                state.global_history = [
+                  {
+                    timestamp: targetOldestLogTime,
+                    input: dummyTokens,
+                    output: 0,
+                    cache: 0
+                  }
+                ];
+                
+                sessionState.last_sync_timestamp = lastMsgTime;
+                
+                if (process.env.DEBUG) {
+                  process.stderr.write(`[status_line] Auto-Calibrated Session to ${targetPercent}% and Reset in ${hours}h ${minutes}m!\n`);
+                }
+                
+                // Save updated state immediately
+                fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+              }
+            } else {
+              // Try command parsing: /sync <percent> <time>
+              const cmdMatch = lastMsg.match(/^\s*\/(?:sync|calibrate|quota)\s+(\d+(?:\.\d+)?)\s+(\d+)\s*(?:시간|h)\s*(\d+)\s*(?:분|m)/i) ||
+                               lastMsg.match(/^\s*\/(?:sync|calibrate|quota)\s+(\d+(?:\.\d+)?)\s+(\d+)\s*(?:시간|h)/i) ||
+                               lastMsg.match(/^\s*\/(?:sync|calibrate|quota)\s+(\d+(?:\.\d+)?)\s+(\d+)\s*(?:분|m)/i);
+              
+              if (cmdMatch) {
+                const targetPercent = parseFloat(cmdMatch[1]);
+                hours = parseInt(cmdMatch[2] || '0', 10);
+                minutes = parseInt(cmdMatch[3] || '0', 10);
+                
+                // Align starting_quota
+                sessionState.starting_quota = targetPercent;
+                sessionState.cumulative_input = 0;
+                sessionState.cumulative_output = 0;
+                sessionState.cumulative_cache = 0;
+                sessionState.accumulated_cache_read_tokens = 0;
+                sessionState.display_input = 0;
+                sessionState.display_output = 0;
+                
+                const remainingMinutes = (hours * 60) + minutes;
+                const remainingMs = remainingMinutes * 60 * 1000;
+                const targetOldestLogTime = currentTime + remainingMs - (5 * 60 * 60 * 1000);
+                
+                // Calculate historical load to allow natural aging-out recovery of sliding window
+                const safetyLimitDenominator = 10000000;
+                const consumedPercent = 100 - targetPercent;
+                const dummyTokens = Math.max(0, Math.floor((consumedPercent / 100) * safetyLimitDenominator));
+
+                state.global_history = [
+                  {
+                    timestamp: targetOldestLogTime,
+                    input: dummyTokens,
+                    output: 0,
+                    cache: 0
+                  }
+                ];
+                
+                sessionState.last_sync_timestamp = lastMsgTime;
+                
+                fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (process.env.DEBUG) process.stderr.write(`[status_line] Calibration error: ${err.message}\n`);
+    }
 
     // ── Self-Healing / Realignment of legacy corrupted state ─────────────────
     const combinedInputAndCache = (sessionState.cumulative_input || 0) + (sessionState.cumulative_cache || 0);
@@ -362,6 +640,11 @@ process.stdin.on('end', () => {
       }
     }
 
+    accumulatedCache = sessionState.accumulated_cache_read_tokens || 0;
+    sessionCumInput = sessionState.cumulative_input || 0;
+    sessionCumOutput = sessionState.cumulative_output || 0;
+    sessionCumCache = sessionState.cumulative_cache || 0;
+
     // 3. Filter history to keep only records within the 5-hour rolling window
     if (!state.global_history) {
       state.global_history = [];
@@ -386,6 +669,78 @@ process.stdin.on('end', () => {
       cache_tokens: globalCumCache
     };
 
+    // 4.5. Dynamically compute 1-minute rate-limit quota remaining
+    const oneMinuteAgo = currentTime - (60 * 1000);
+    const oneMinHistory = state.global_history.filter(log => log.timestamp >= oneMinuteAgo);
+
+    let oneMinInput = 0;
+    let oneMinOutput = 0;
+    let oneMinCache = 0;
+    const oneMinRequests = oneMinHistory.length;
+
+    for (const log of oneMinHistory) {
+      oneMinInput += log.input;
+      oneMinOutput += log.output;
+      oneMinCache += log.cache;
+    }
+    const oneMinTotalTokens = oneMinInput + oneMinOutput + oneMinCache;
+
+    function getRateLimits(mId, mName, plan) {
+      const id = (mId || mName || '').toLowerCase();
+      const planStr = (plan || '').toLowerCase();
+      const isPaid = planStr.includes('pro') || planStr.includes('enterprise') || planStr.includes('pay');
+
+      // Gemini 3.1 Pro / 3.5 Pro
+      if (id.includes('pro')) {
+        return isPaid ? { tpm: 10000000, rpm: 1000 } : { tpm: 2000000, rpm: 360 };
+      }
+      
+      // Gemini 3.1 Flash
+      if (id.includes('3.1') && id.includes('flash')) {
+        return isPaid ? { tpm: 10000000, rpm: 2000 } : { tpm: 4000000, rpm: 15 };
+      }
+      
+      // Gemini 3.5 Flash
+      if (id.includes('3.5') && id.includes('flash')) {
+        return isPaid ? { tpm: 4000000, rpm: 1000 } : { tpm: 1000000, rpm: 15 };
+      }
+      
+      // Default fallback
+      return isPaid ? { tpm: 4000000, rpm: 1000 } : { tpm: 1000000, rpm: 15 };
+    }
+
+    const activeModelId = (data.model && data.model.id) || '';
+    const activePlan = data.plan_tier || 'Google AI Pro';
+    const limits = getRateLimits(activeModelId, modelName, activePlan);
+
+    // 1. Long-term Safety Quota: calculated dynamically from the active 5-hour rolling window
+    const safetyLimitDenominator = 10000000; // 10M tokens total safety budget
+    const fiveHourTokensUsed = globalCumInput + globalCumOutput;
+    let calculatedSafetyQuota = 100 - (fiveHourTokensUsed / safetyLimitDenominator) * 100;
+    if (!isFinite(calculatedSafetyQuota)) calculatedSafetyQuota = 100;
+    calculatedSafetyQuota = Math.max(0, Math.min(100, calculatedSafetyQuota));
+
+    if (serverQuotaPercent !== null) {
+      if (serverQuotaPercent < calculatedSafetyQuota) {
+        calculatedSafetyQuota = serverQuotaPercent;
+      }
+    }
+
+    // 2. Immediate 1-minute Rate Limit Quota (RPM/TPM bottleneck)
+    const tpmUsedPercent = (oneMinTotalTokens / limits.tpm) * 100;
+    const tpmRemainingPercent = Math.max(0, 100 - tpmUsedPercent);
+
+    const rpmUsedPercent = (oneMinRequests / limits.rpm) * 100;
+    const rpmRemainingPercent = Math.max(0, 100 - rpmUsedPercent);
+    const minuteQuotaPercent = Math.min(tpmRemainingPercent, rpmRemainingPercent);
+
+    // The final live quota tracks the strictly monotonic-decreasing long-term safety quota
+    liveQuotaPercent = calculatedSafetyQuota;
+    
+    // For backwards compatibility and UI display logic: allow base quota to recover
+    const calibratedQuota = (sessionState.starting_quota !== undefined) ? sessionState.starting_quota : 100;
+    baseQuotaPercent = Math.max(calibratedQuota, liveQuotaPercent);
+
     // Save state again after history filter
     try {
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
@@ -393,8 +748,19 @@ process.stdin.on('end', () => {
       // Ignored
     }
 
-    // 5. Calculate precise remaining time until oldest item ages out
-    if (state.global_history.length > 0) {
+    // 5. Calculate precise remaining time using fetched ground-truth resetTime if available
+    if (realQuota !== null && realQuota.resetTime) {
+      try {
+        const resetDate = new Date(realQuota.resetTime);
+        const timeRemainingMs = Math.max(0, resetDate.getTime() - currentTime);
+        const remHours = Math.floor(timeRemainingMs / (60 * 60 * 1000));
+        const remMinutes = Math.floor((timeRemainingMs % (60 * 60 * 1000)) / (60 * 1000));
+        timeRemainingStr = `${remHours}h ${remMinutes}m`;
+      } catch (err) {
+        if (process.env.DEBUG) process.stderr.write(`[status_line] Failed to compute reset countdown: ${err.message}\n`);
+        timeRemainingStr = '5h 00m';
+      }
+    } else if (state.global_history.length > 0) {
       const oldestLogTime = state.global_history[0].timestamp;
       const timeRemainingMs = Math.max(0, (oldestLogTime + (5 * 60 * 60 * 1000)) - currentTime);
       const remHours = Math.floor(timeRemainingMs / (60 * 60 * 1000));
@@ -403,11 +769,6 @@ process.stdin.on('end', () => {
     } else {
       timeRemainingStr = '5h 00m';
     }
-
-    accumulatedCache = sessionState.accumulated_cache_read_tokens;
-    sessionCumInput = sessionState.cumulative_input;
-    sessionCumOutput = sessionState.cumulative_output;
-    sessionCumCache = sessionState.cumulative_cache;
   } else {
     accumulatedCache = cacheHit;
     globalCumInput = totalInput;
@@ -477,6 +838,14 @@ process.stdin.on('end', () => {
     realCtxColor = t.crit;
   } else if (realContextUsedPercent >= 50) {
     realCtxColor = t.warn;
+  }
+
+  // Live Quota remaining color: green → yellow → red as remaining shrinks
+  let quotaColor = t.ok;
+  if (liveQuotaPercent < 20) {
+    quotaColor = t.crit;
+  } else if (liveQuotaPercent < 50) {
+    quotaColor = t.warn;
   }
 
   const progressBarStr = makeProgressBar(remainingPercent, 6);
@@ -680,8 +1049,8 @@ process.stdin.on('end', () => {
     const l1Right = [pieceSubagents, pieceTasks, pieceArtifacts, pieceProgress].join(` ${pStr} `);
     line1 = renderSplitLine(l1Left, l1Right, termWidth);
 
-    // Line 2: Model Name (Left) <---> Cost Statistics (Right)
-    const l2Left = `🤖 [${t.model}${modelName}${reset}]`;
+    // Line 2: Model Name & Live Quota (Left) <---> Cost Statistics (Right)
+    const l2Left = `🤖 [${t.model}${modelName}${reset} ${t.divider}|${reset} ⚡ ${quotaColor}Quota:${liveQuotaPercent.toFixed(1)}%/${baseQuotaPercent.toFixed(1)}%${reset} ${t.divider}(Reset: ${timeRemainingStr})${reset}]`;
     const l2Right = `💵 ${formattedCostWide}`;
     line2 = renderSplitLine(l2Left, l2Right, termWidth);
 
@@ -696,8 +1065,8 @@ process.stdin.on('end', () => {
     const l1Right = [pieceSubMedium, pieceTskMedium, pieceArtMedium, piecePrgMedium].join(` ${pStr} `);
     line1 = renderSplitLine(l1Left, l1Right, termWidth);
 
-    // Line 2: Model Name (Left) <---> Medium Cost (Right)
-    const l2Left = `🤖 [${t.model}${modelName}${reset}]`;
+    // Line 2: Model Name & Live Quota (Left) <---> Medium Cost (Right)
+    const l2Left = `🤖 [${t.model}${modelName}${reset} ${t.divider}|${reset} ⚡ ${quotaColor}Q:${liveQuotaPercent.toFixed(1)}%/${baseQuotaPercent.toFixed(1)}%${reset} ${t.divider}(Rst: ${timeRemainingStr})${reset}]`;
     const l2Right = `💵 ${formattedCostMed}`;
     line2 = renderSplitLine(l2Left, l2Right, termWidth);
 
@@ -717,7 +1086,7 @@ process.stdin.on('end', () => {
     const l1Right = [`⏳${subColor}${subagentCount}${reset}`, `⚙️${t.value}${taskCount}${reset}`, `🎯${t.progress}${progress}%${reset}`].join(` ${pStr} `);
     line1 = renderSplitLine(l1Left, l1Right, termWidth);
 
-    const l2Left = `🤖 [${t.model}${modelName.substring(0, 10)}${reset}]`;
+    const l2Left = `🤖 [${t.model}${modelName.substring(0, 10)}${reset} ${t.divider}|${reset}⚡${quotaColor}${liveQuotaPercent.toFixed(1)}%/${baseQuotaPercent.toFixed(1)}%${reset} ${t.divider}(${timeRemainingStr})${reset}]`;
     const l2Right = `💵 ${formattedCostNarr}`;
     line2 = renderSplitLine(l2Left, l2Right, termWidth);
 
