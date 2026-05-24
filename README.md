@@ -34,7 +34,8 @@
 - **Active Subagent Telemetry** — Live monitors and counts running subagents by parsing conversation transcripts.
 - **Task.md Sync** — Computes and renders real-time progress checklist percentages directly onto the status bar.
 - **Context Utilization Dial** — Visualizes total input/output vs. absolute context limit with dynamic amber/red alert thresholds.
-- **Live Quota & Reset Tracker** — Computes and estimates real-time remaining API quota (rolling 5-hour safety limit & 1-minute RPM/TPM rate limits) with precise countdown reset countdowns on the status bar.
+- **Ground-Truth Server Quota Syncing** — Automatically fetches your actual remaining usage/quota values and ground-truth reset timestamps from the Google Cloud/API backend upon launching `agy`, ensuring perfect state synchronization.
+- **Live Quota & Reset Tracker** — Estimates real-time remaining API quota (combining 5-hour rolling windows & 1-minute RPM/TPM rate limits) and displays precise countdowns to reset times directly on the status bar.
 - **4 Custom Themes** — `aurora` (DeepMind default), `cyberpunk`, `classic`, and `minimal`.
 
 ---
@@ -185,6 +186,7 @@ agy-status-line/
 ## 📝 Changelog
 
 ### v0.4.0
+- **Ground-Truth Server Quota Syncing** — Connects directly to the Google Cloud/API backend on `agy` session launch, fetching the actual usage statistics and ground-truth remaining quota/reset timing for perfect alignment.
 - **Real-time Live Quota Tracking** — Integrates dynamic rate-limit estimations based on 5-hour rolling token consumption and 1-minute RPM/TPM thresholds.
 - **Quota Reset Countdown** — Tracks ground-truth `resetTime` provided by the API and renders remaining time dynamically on the status bar (e.g. `Reset: Xh Ym`).
 - **Collapsible Bilingual Layout** — Revamped README to be English base with a collapsible Korean documentation block to improve readability.
@@ -223,7 +225,8 @@ agy-status-line/
 - **서브에이전트 텔레메트리** — 실시간 백그라운드에서 가동 중인 서브에이전트 개수를 실시간 파싱하여 표기합니다.
 - **Task.md 진행률 동기화** — 작업 디렉토리의 `task.md` 할 일 목록 완수 비율(%)을 실시간 계산하여 출력합니다.
 - **컨텍스트 위젯** — 전체 사용 토큰량 대 컨텍스트 한계 용량을 동적 경고 임계치(황색/적색)와 함께 비율로 시각화합니다.
-- **실시간 잔여 쿼터 및 리셋 카운트다운** — 최근 5시간 누적 토큰 소비 및 1분당 RPM/TPM 처리 한도를 실시간 종합 분석하여 잔여 사용 쿼터 비율 및 리셋까지의 시간을 실시간 표기합니다.
+- **로그인 시 실시간 서버 쿼터 동기화** — `agy` 세션을 실행하고 구동할 때 백엔드 서버 및 API로부터 실제 잔여 사용량(usage) 및 리셋 대기 시간 실 수치를 동적으로 패치하여 상태바 데이터를 오차 없이 실시간 동기화합니다.
+- **실시간 잔여 쿼터 및 리셋 카운트다운** — 최근 5시간 누적 토큰 소비 데이터 및 1분당 RPM/TPM 처리 한도를 실시간 종합 분석하여 잔여 사용 쿼터 비율 및 리셋까지의 남은 대기 시간을 표기합니다.
 - **4가지 프리미엄 디자인 테마** — `aurora` (기본값), `cyberpunk`, `classic`, `minimal`을 제공합니다.
 
 ---
@@ -373,6 +376,7 @@ agy-status-line/
 ## 📝 업데이트 내역 (Changelog)
 
 ### v0.4.0
+- **로그인 시 실시간 서버 쿼터 동기화** — `agy` 세션을 시작할 때 구글 클라우드/API 백엔드 서버로부터 실제 사용 수치 및 ground-truth 리셋 카운트다운을 즉시 조회 및 동기화하여 완벽한 상태를 복원합니다.
 - **실시간 API 잔여 쿼터 측정** — 최근 5시간 누적 토큰 소비 및 1분당 RPM/TPM 처리 제한 병목에 기반한 실시간 잔여 사용 쿼터 추적 기능 탑재.
 - **쿼터 리셋 카운트다운** — API가 제공하는 ground-truth `resetTime`을 파싱하여 상태창에 실시간 리셋 대기 시간 표기 (예: `Reset: Xh Ym`).
 - **접이식 다국어 문서 레이아웃 개편** — 영어 문서를 기본 노출하고, 한국어 설명서는 접이식 `<details>` 블록으로 감싸 가독성 향상.
